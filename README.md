@@ -1,5 +1,11 @@
-# ESPHome Component: Addressable Light Digital Display
-
+# ESPHome Component: Addressable Light Digital Display With D1 mini (esp8266) 
+For my example i use an adressable led for Christmas tree, and D1 mini
+I hack a clock (3D Mini Clock LED Digital Wall Clock Desk Clock Electronic Alarm Clock Living Room Wall Clock DIY Kitchen Timer)
+* [3D Mini Clock LED Digital Wall Clock](https://fr.aliexpress.com/item/1005006353811631.html)
+AND 
+20M Dream Color USB 5V LED
+* [20M Dream Color USB 5V LED Sting Light Bluetooth Music APP RGBIC Addressable Fairy Lights Birthday Party Garland Christmas Decor](https://fr.aliexpress.com/item/1005006108817683.html)
+  
 [<img src="images/big_digital_display_by_dawei_zhang_202011.jpg" alt="drawing" height="200"/>](images/big_digital_display_by_dawei_zhang_202011.jpg) 
 [<img src="images/small_digital_display_by_dawei_zhang_202201.jpg" alt="drawing" height="200"/>](images/small_digital_display_by_dawei_zhang_202201.jpg) 
 [<img src="images/home_assistant_control.jpg" alt="drawing" height="200"/>](images/home_assistant_control.jpg)
@@ -36,7 +42,7 @@ To build a similar digital display, you need the following components:
 
 ### Design
 
-The display below uses 30 LEDs (WS2812B) and one NodeMCU ESP32, which can be powered directly via USB 5V 2A power adapter. (5V 1A power is not enough for maximum brightness.)
+The display below uses 30 LEDs (WS2812B) and one D1 mini (esp8266), which can be powered directly via USB 5V 2A power adapter. (5V 1A power is not enough for maximum brightness.)
 
 For each digit to display, LED sequence doesn't matter, because you can configure it later, but it's better to keep the sequence consistent across all digits. 
 
@@ -46,6 +52,7 @@ Besides 7-segment symbols, you can also add special symbols to the display. Curr
 
 In this case, for each digit, LEDs are connected in the sequence of `BAFEDCG`. The green and blue wires are for data, starting from right to left. 
 ```
+if you want to use "ABCDEFG" in order, you have to follow this order for wiring.
       A
      ---
   F |   | B
@@ -60,12 +67,6 @@ Connect the LED in serial way, starting from RIGHT to LEFT of the display. There
 
 ## Configuration
 
-### Examples
-- [Digital Clock](examples/digital_clock.yaml) supports Internet SNTP time synchronization and daylight time auto-switch.
-
-### Import display component
-- `ref`: can either be a branch name (such as `main`) or a tag name (such as `v0.1.0`)
-
 Read more about external components [here](https://esphome.io/components/external_components.html).
 
 ```yaml
@@ -79,18 +80,20 @@ external_components:
 
 ### Light component
 
-`id` is required for display component to reference. Make sure correct `chipset`, `pin`, `num_leds` and `rgb_order` is set. This light doesn't need to expose to Home Assistant, so `internal: true`. 
+`id` is required for display component to reference. Make sure correct  `pin`, `num_leds` and `rgb_order` is set. For this time i use HAOS time, see in next code. 
 
 ```yaml
 light:
-  - platform: fastled_clockless
-    internal: true
+  - platform: neopixelbus
+    type: GRB
+    variant: WS2811
+    pin: GPIO2
+    num_leds: 30
     id: internal_light_state
-    chipset: WS2812B
-    pin: GPIO33
-    num_leds: 90
-    rgb_order: GRB
 ```
+light:
+  - platform: fastled_clockless
+  don't work on esp8266 (D1 mini)
 
 ### Display component
 
@@ -112,6 +115,10 @@ For more information about suported characters, please read [ascii_to_raw.h](com
 To print time, [`time` component](https://esphome.io/components/time.html) is required.
 
 ```yaml
+# ---- récupération heure HAOS ----
+time:
+  - platform: homeassistant
+    id: ha_time
 display:
   - platform: addressable_light_digital_display
     id: digital_clock
@@ -121,12 +128,93 @@ display:
     icon: "mdi:clock-digital"
     restore_mode: ALWAYS_ON
     default_transition_length: 0s
-    led_map: ". CCCDDDEEEFFFAAABBBGGG . CCCDDDEEEFFFAAABBBGGG :: . CCCDDDEEEFFFAAABBBGGG . CCCDDDEEEFFFAAABBBGGG"
+    led_map: "BAFEDCG BAFEDCG :: BAFEDCG BAFEDCG"
     reverse: true
     update_interval: 500ms
     lambda: |-
       if (millis() % 1000 < 500)
-        it.strftime("%H:%M", sntp_time->now());
+        it.strftime("%H:%M", id(ha_time).now());
       else
-        it.strftime("%H %M", sntp_time->now());
+        it.strftime("%H %M", id(ha_time).now());
+
 ```
+### "BONUS" CHANGE COLOR WITH BINARY SENSOR
+I search long time with GPT to change color when my "WC01" light is on or off. 
+Changing color was very hard because D1 mini don't support a lot of variable, set_color/set_rgb or other don't work.
+So the idea is to create a binary sensor and change color of "light_id: digital_display_light"
+My sensor is on another esp32, you can use all entity on Homeassistant.
+
+```yaml
+# ---- Binary sensor pour WC01 ----
+binary_sensor:
+  - platform: homeassistant
+    id: wc01_led_state 
+    entity_id: light.wc01_led
+    on_press:
+      - light.turn_on:
+          id: digital_display_light
+          green: 100%
+          red: 0%
+          blue: 0%
+    on_release:
+      - light.turn_on:
+          id: digital_display_light
+          green: 0%
+          red: 0%
+          blue: 100%
+```
+### ALL CODE 
+```yaml
+captive_portal:
+# ---- récupération heure HAOS ----
+time:
+  - platform: homeassistant
+    id: ha_time
+
+light:
+  - platform: neopixelbus
+    type: GRB
+    variant: WS2811
+    pin: GPIO2
+    num_leds: 30
+#    name: "Horloge"
+    id: internal_light_state
+#    color_correct: [0%,0%,100%] #// don't set color here, changing color don"t work if you set here.
+
+display:
+  - platform: addressable_light_digital_display
+    id: digital_clock
+    light_id: digital_display_light
+    name: Digital Clock
+    addressable_light_id: internal_light_state
+    icon: "mdi:clock-digital"
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+    led_map: "BAFEDCG BAFEDCG :: BAFEDCG BAFEDCG"
+    reverse: true
+    update_interval: 500ms
+    lambda: |-
+      if (millis() % 1000 < 500)
+        it.strftime("%H:%M", id(ha_time).now());
+      else
+        it.strftime("%H %M", id(ha_time).now());
+
+# ---- Binary sensor pour WC01 ----
+binary_sensor:
+  - platform: homeassistant
+    id: wc01_led_state
+    entity_id: light.wc01_led
+    on_press:
+      - light.turn_on:
+          id: digital_display_light
+          green: 100%
+          red: 0%
+          blue: 0%
+    on_release:
+      - light.turn_on:
+          id: digital_display_light
+          green: 0%
+          red: 0%
+          blue: 100%
+```
+
